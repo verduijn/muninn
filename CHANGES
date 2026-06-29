@@ -1,10 +1,24 @@
+* Added support for psycopg (V3) as backend library for postgresql. This is now
+  also the default library for the postgresql backend.
+
 * Added support for --human-readable option to muninn-search.
+
+* Added support for offset parameter in archive.search().
 
 * Added explicit 'max concurrent requests' setting for sftp remote backend to
   prevent potential request flooding of sftp servers when downloading large
   files (which could result in very slow download behaviour).
 
 * Allow synchronizer names in archive config to contain '-' (and disallow '.').
+
+* Implemented workaround for unbounded requests in paramiko sftp backend and
+  properly support timeout setting.
+
+* The file:// remote_url setting when storage=none will now have a trailing '/'
+  for the enclosing directory of multi-file products (to distinguish it from
+  products that are a directory themselves).
+
+* Fix invalid distinction between 'not' and 'not in' in some query expressions.
 
 7.2.1 2025-10-31
 ~~~~~~~~~~~~~~~~

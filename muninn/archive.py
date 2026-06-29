@@ -670,7 +670,7 @@ class Archive(object):
 
             if remote_url.startswith('file://'):
                 product_path = remote_url[7:]
-                if os.path.isdir(product_path):
+                if os.path.isdir(product_path) and product_path[-1] == '/':
                     paths = [os.path.join(product_path, basename) for basename in os.listdir(product_path)]
                 else:
                     paths = [product_path]
@@ -769,7 +769,6 @@ class Archive(object):
                             against the metadata hash (if it exists).
         use_current_path -- Ingest the product by keeping the file(s) at the current path (which must be inside the
                             root directory of the archive).
-                            This option is ignored if `ingest_product` is False.
         force            -- If set to True, then skip default size check between product and existing metadata.
 
         Returns:
@@ -1242,7 +1241,7 @@ class Archive(object):
                     for path in paths:
                         if os.path.dirname(path) != parent_path:
                             raise Error("all paths need to have the same parent directory")
-                    updated_properties.core.remote_url = 'file://' + os.path.realpath(os.path.dirname(paths[0]))
+                    updated_properties.core.remote_url = 'file://' + os.path.realpath(os.path.dirname(paths[0])) + '/'
                 updated_properties.core.remote_url = updated_properties.core.remote_url.replace('\\', '/')
 
         except Exception as e:
@@ -1664,7 +1663,7 @@ class Archive(object):
         if self._storage is not None:
             return self._storage._root.replace('\\', '/')
 
-    def search(self, where="", order_by=[], limit=None, parameters={}, namespaces=[], property_names=[]):
+    def search(self, where="", order_by=[], limit=None, parameters={}, namespaces=[], property_names=[], offset=None):
         """Search the product catalogue for products matching the specified search expression.
 
         Arguments:
@@ -1683,11 +1682,12 @@ class Archive(object):
                         Properties are specified as `<namespace>.<identifier>`
                         (the namespace can be omitted for the `core` namespace).
                         If the `property_names` parameter is provided then the namespaces parameter is ignored.
+        offset      --  Offset the results by the specified number, useful for pagination.
 
         Returns:
         A list of matching products.
         """
-        return self._database.search(where, order_by, limit, parameters, namespaces, property_names)
+        return self._database.search(where, order_by, limit, parameters, namespaces, property_names, offset)
 
     def source_products(self, uuid):
         """Return the UUIDs of the products that are linked to the given product as source products.

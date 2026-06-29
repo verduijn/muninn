@@ -11,6 +11,13 @@ import inspect
 import json
 
 try:
+    import psycopg
+    from psycopg.adapt import Dumper, Loader
+    from psycopg.types import TypeInfo
+except ImportError:
+    pass
+
+try:
     import psycopg2
     import psycopg2.extensions
     import psycopg2.extras
@@ -140,6 +147,30 @@ def _connect_psycopg2(connection_string):
 
     return _connection
 
+def _connect_psycopg(connection_string):
+    class GeometryDumper(Dumper):
+        def dump(self, obj):
+            return ewkb.encode_hexewkb(obj).encode()
+
+    class GeographyLoader(Loader):
+        def load(self, data):
+            if data is None:
+                return None
+            return ewkb.decode_hexewkb(data)
+
+    _connection = psycopg.connect(connection_string)
+
+    # Register adapter for the Geometry type.
+    _connection.adapters.register_dumper(geometry.Geometry, GeometryDumper)
+
+    # Register cast for the Geometry type.
+    info = TypeInfo.fetch(_connection, "geography")
+    if info is None:
+        raise InternalError('unable to retrieve type object id of database type: "GEOGRAPHY"')
+    _connection.adapters.register_loader(info.oid, GeographyLoader)
+
+    return _connection
+
 
 class _PostgresqlConfig(Mapping):
     _alias = "postgresql"
@@ -169,9 +200,8 @@ def translate_errors(func):
             return func(self, *args, **kwargs)
         except self._connection._backend.Error as _error:
             message = None
-
-            # psycopg2
-            if self._library == 'psycopg2':
+            # psycopg
+            if self._library in ('psycopg2', 'psycopg'):
                 try:
                     message = _error.diag.message_primary
                     if message is not None:
@@ -215,7 +245,13 @@ class PostgresqlConnection(object):
         self._connection = None
         self._in_transaction = False
 
-        if library == 'psycopg2':
+        if library == 'psycopg':
+            try:
+                self._backend = psycopg
+            except NameError:
+                raise Error('could not import psycopg')
+
+        elif library == 'psycopg2':
             try:
                 self._backend = psycopg2
             except NameError:
@@ -257,9 +293,11 @@ class PostgresqlConnection(object):
             self._in_transaction = False
             self.close()
 
+
     def _connect(self):
-        # Re-establish the connection to the database.
-        if self._library == 'psycopg2':
+        if self._library == 'psycopg':
+            self._connection = _connect_psycopg(self._connection_string)
+        elif self._library == 'psycopg2':
             self._connection = _connect_psycopg2(self._connection_string)
         else:
             self._connection = _connect_pg8000(self._connection_string)
@@ -288,7 +326,7 @@ class PostgresqlConnection(object):
 
 
 class PostgresqlBackend(DatabaseBackend):
-    def __init__(self, connection_string="", table_prefix="", library="psycopg2"):
+    def __init__(self, connection_string="", table_prefix="", library="psycopg"):
         self._connection = PostgresqlConnection(connection_string, library)
         self._library = library
 
@@ -362,7 +400,7 @@ class PostgresqlBackend(DatabaseBackend):
                       (self._link_table_name, self._link_table_name))
 
         # Create the table for tags.
-        result.append("CREATE TABLE %s (id SERIAL PRIMARY KEY, uuid UUID NOT NULL, tag TEXT NOT NULL);" %
+        result.append("CREATE TABLE %s (id SERIAL PRIMARY KEY, uuid UUID NOT NULL, tag TEXT COLLATE \"C\" NOT NULL);" %
                       self._tag_table_name)
         result.append("ALTER TABLE %s ADD CONSTRAINT %s_tag_uuid_tag_uniq UNIQUE (uuid, tag);" %
                       (self._tag_table_name, self._tag_table_name))
@@ -509,7 +547,7 @@ class PostgresqlBackend(DatabaseBackend):
         # For those cases we swallow the exception.
         swallow = False
 
-        if self._library == 'psycopg2':
+        if self._library in ('psycopg2', 'psycopg'):
             try:
                 if _error.pgcode == PG_UNIQUE_VIOLATION:
                     swallow = True
@@ -942,9 +980,9 @@ class PostgresqlBackend(DatabaseBackend):
         return sqls
 
     @translate_errors
-    def search(self, where="", order_by=[], limit=None, parameters={}, namespaces=[], property_names=[]):
+    def search(self, where="", order_by=[], limit=None, parameters={}, namespaces=[], property_names=[], offset=None):
         query, query_parameters, query_description = \
-            self._sql_builder.build_search_query(where, order_by, limit, parameters, namespaces, property_names)
+            self._sql_builder.build_search_query(where, order_by, limit, parameters, namespaces, property_names, offset)
 
         with self._connection:
             cursor = self._connection.cursor()
